@@ -1,6 +1,6 @@
 {
   "name": "gigbag.js",
-  "version": "0.4.4",
+  "version": "0.4.5",
   "private": true,
   "type": "module",
   "description": "Shared alphaTab customizations: Vite plugin, patches and React player parts.",
