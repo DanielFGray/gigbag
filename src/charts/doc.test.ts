@@ -3,7 +3,13 @@ import { readFileSync } from "node:fs"
 import { ChordLyricsPair, ChordProParser, Literal, Tag } from "chordsheetjs"
 import { composeChanges, explains, type Change } from "./changes.ts"
 import {
+  addChordLine,
   addPhrase,
+  chordLineText,
+  isChordOnly,
+  pasteAfter,
+  pasteTarget,
+  setChordLine,
   addScoreLink,
   addSection,
   anchorLine,
@@ -35,7 +41,7 @@ import {
   type Edit,
 } from "./doc.ts"
 import { follow, mapRange } from "./follow.ts"
-import { importPasted } from "./lyrics.ts"
+import { importPasted, pastedPassage } from "./lyrics.ts"
 
 const fixture = readFileSync(new URL("../../test/fixtures/amazing-grace.txt", import.meta.url), "utf8")
 const source = importPasted(fixture, "G")
@@ -675,5 +681,121 @@ describe("drop slots", () => {
     expect(dropSlots(chart, 5)).toEqual({ before: 4, after: 7 })
     expect(dropSlots(chart, 4)).toEqual({ before: 4, after: 7 })
     expect(dropSlots(chart, 8)).toEqual({ before: 8, after: 9 })
+  })
+})
+
+describe("chord-only lines", () => {
+  const verse = parseDoc("{start_of_verse: Verse}\nAmazing [G]grace\n{end_of_verse}")
+
+  test("a typed chord line keeps its spacing and reads back as typed", () => {
+    const edit = addChordLine(verse, 1, "G    C  D")
+    expect(serializeDoc(edit.doc).split("\n")[2]).toBe("[G]     [C]   [D]")
+    const line = edit.doc[2]!
+    expect(isChordOnly(line)).toBe(true)
+    if (line.kind !== "lyrics") throw new Error("expected a lyric line")
+    expect(chordLineText(line)).toBe("G    C  D")
+    expectExact(verse, edit)
+  })
+
+  test("chord names longer than their gap read back with one space between them", () => {
+    const line = parseDoc("[Cmaj7][G]")[0]!
+    if (line.kind !== "lyrics") throw new Error("expected a lyric line")
+    expect(chordLineText(line)).toBe("Cmaj7 G")
+  })
+
+  test("a chord line rejects text the paste importer would not read as chords", () => {
+    expect(() => addChordLine(verse, 1, "G and some words")).toThrow()
+  })
+
+  test("editing a chord line replaces its chords; blank text leaves a blank line", () => {
+    const added = addChordLine(verse, 1, "G  C").doc
+    const edit = setChordLine(added, 2, "G  C  D")
+    expect(serializeDoc(edit.doc).split("\n")[2]).toBe("[G]   [C]   [D]")
+    expectExact(added, edit)
+    const cleared = setChordLine(added, 2, "  ")
+    expect(cleared.doc[2]).toEqual({ kind: "lyrics", text: "", chords: [] })
+    expectExact(added, cleared)
+  })
+
+  test("a chord-only line has a stretch past its last chord, and a chord there extends the line", () => {
+    const added = addChordLine(verse, 1, "G  C").doc
+    const line = added[2]!
+    if (line.kind !== "lyrics") throw new Error("expected a lyric line")
+    const last = segments(line).at(-1)!
+    expect(last).toEqual({ start: 6, end: 6, chords: [] })
+    const edit = placeChord(added, 2, last.start, "D")
+    expect(serializeDoc(edit.doc).split("\n")[2]).toBe("[G]   [C]   [D]")
+    expectExact(added, edit)
+  })
+
+  test("a line with words gets no stretch past its end", () => {
+    const line = verse[1]!
+    if (line.kind !== "lyrics") throw new Error("expected a lyric line")
+    expect(segments(line).at(-1)!.end).toBe(line.text.length)
+  })
+
+  test("the first chord on a blank line makes it a chord-only line", () => {
+    const blank = parseDoc("Amazing grace\n")
+    const edit = placeChord(blank, 1, 0, "G")
+    expect(isChordOnly(edit.doc[1]!)).toBe(true)
+    const line = edit.doc[1]!
+    if (line.kind !== "lyrics") throw new Error("expected a lyric line")
+    expect(segments(line).map((s) => s.start)).toEqual([0, 3])
+  })
+})
+
+describe("pasting into a chart", () => {
+  const chart = parseDoc(
+    "{start_of_verse: Verse}\nAmazing [G]grace\nhow sweet\n{end_of_verse}\n{start_of_tab}\ne|--0--|\n{end_of_tab}",
+  )
+
+  test("a passage with no headers goes right below the line", () => {
+    const source = pastedPassage("G      C\nthat saved a wretch")
+    expect(pasteTarget(chart, 1, source)).toEqual({ at: 2, moved: false })
+    const edit = pasteAfter(chart, 1, source)
+    expect(serializeDoc(edit.doc).split("\n").slice(1, 4)).toEqual([
+      "Amazing [G]grace",
+      "[G]that sa[C]ved a wretch",
+      "how sweet",
+    ])
+    expectExact(chart, edit)
+  })
+
+  test("a passage below a section heading goes at the top of the section", () => {
+    const edit = pasteAfter(chart, 0, pastedPassage("G  C"))
+    expect(serializeDoc(edit.doc).split("\n").slice(0, 2)).toEqual(["{start_of_verse: Verse}", "[G]   [C]"])
+  })
+
+  test("a passage with its own sections goes after the section it would land in", () => {
+    const source = pastedPassage("[Chorus]\nG\nI once was lost")
+    expect(pasteTarget(chart, 1, source)).toEqual({ at: 4, moved: true })
+    const edit = pasteAfter(chart, 1, source)
+    expect(serializeDoc(edit.doc).split("\n").slice(3, 7)).toEqual([
+      "{end_of_verse}",
+      "{start_of_chorus: Chorus}",
+      "[G]I once was lost",
+      "{end_of_chorus}",
+    ])
+    expectExact(chart, edit)
+  })
+
+  test("nothing is pasted into a tab", () => {
+    expect(pasteTarget(chart, 4, pastedPassage("G  C"))).toEqual({ at: 7, moved: true })
+  })
+
+  test("a passage at the end of the chart follows its last line", () => {
+    const edit = pasteAfter(chart, chart.length - 1, pastedPassage("G  C"))
+    expect(serializeDoc(edit.doc).split("\n").at(-1)).toBe("[G]   [C]")
+    expectExact(chart, edit)
+  })
+
+  test("the song's details in a paste are left out, its sections and comments kept", () => {
+    expect(pastedPassage("{title: Amazing Grace}\n{key: D}\n{comment: slowly}\nG\nAmazing")).toBe(
+      "{comment: slowly}\n[G]Amazing",
+    )
+  })
+
+  test("blank text pastes nothing", () => {
+    expect(pasteAfter(chart, 1, pastedPassage("  ")).changes).toEqual([])
   })
 })

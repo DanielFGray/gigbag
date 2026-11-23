@@ -135,6 +135,18 @@ export declare function importPasted(text: string, writtenKey?: string | null): 
  */
 export declare function exportChords(source: string, shownKey?: string | null): string;
 /**
+ * A chord-only line (an intro, a turnaround, a solo's changes) as ChordPro:
+ * each chord at its column over blank text, so the line keeps the spacing it
+ * was written with. `line` must pass `isChordLine`.
+ */
+export declare function chordLineSource(line: string): string;
+/**
+ * Pasted text as lines to put inside a chart that already exists: what
+ * `importPasted` makes of it, without the song's details (key, title, artist,
+ * tempo and the like), which belong to the chart and not to a passage of it.
+ */
+export declare function pastedPassage(text: string): string;
+/**
  * True for a line of ASCII tab (`e|--0--3h5--|`): an optional string name,
  * then dashes, frets, bar lines and technique letters, with at least four
  * dashes making up a third of it, and a bar line or a string name.

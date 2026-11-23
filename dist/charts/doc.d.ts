@@ -46,10 +46,23 @@ export declare function serializeDoc(doc: ChartDoc): string;
 /** The anchor text of the whole chart. */
 export declare function anchorText(doc: ChartDoc): string;
 export declare function anchorLine(line: DocLine): string;
-/** The word-sized stretches of a lyric line, split further where a chord sits inside a word. */
+/**
+ * The word-sized stretches of a lyric line, split further where a chord sits
+ * inside a word. A chord-only line has no words, so it also has an empty
+ * stretch past its last chord, where the next chord of the passage goes.
+ */
 export declare function segments(line: Extract<DocLine, {
     kind: "lyrics";
 }>): ReadonlyArray<Segment>;
+/** True for a lyric line with chords and no words: an intro, a turnaround, a solo's changes. */
+export declare function isChordOnly(line: DocLine): boolean;
+/**
+ * A chord-only line as a player types it: each chord name at its column, with
+ * at least one space between names. `chordLineSource` reads it back.
+ */
+export declare function chordLineText(line: Extract<DocLine, {
+    kind: "lyrics";
+}>): string;
 /**
  * Puts `chord` on the stretch of `lineIndex` that starts at column `at`,
  * replacing the chord already there.
@@ -72,6 +85,30 @@ export declare function moveChord(doc: ChartDoc, source: {
  * sits inside a repeat within the one line.
  */
 export declare function editLine(doc: ChartDoc, lineIndex: number, text: string): Edit;
+/** Puts a chord-only line, read from `text` as a player types it (`G  C  D`), after `lineIndex`. */
+export declare function addChordLine(doc: ChartDoc, lineIndex: number, text: string): Edit;
+/**
+ * Gives the chord-only line at `lineIndex` the chords of `text`, as a player
+ * types them; blank text leaves a blank line. The change is the replacement
+ * between the common start and end of the line's old and new anchor text.
+ */
+export declare function setChordLine(doc: ChartDoc, lineIndex: number, text: string): Edit;
+/**
+ * Where lines pasted below `lineIndex` go, as the index the first of them
+ * takes. Sections do not nest, and nothing enters a tab or a phrase, so a
+ * paste that holds a section start, or one below a line of a tab or a phrase,
+ * goes after the end of the section it would land in; `moved` says so.
+ */
+export declare function pasteTarget(doc: ChartDoc, lineIndex: number, source: string): {
+    at: number;
+    moved: boolean;
+};
+/**
+ * Puts ChordPro `source` (from `pastedPassage`) below the line at `lineIndex`,
+ * or where `pasteTarget` moves it. The lines are new text, so the change set
+ * is one insertion and marks around it stay on their words.
+ */
+export declare function pasteAfter(doc: ChartDoc, lineIndex: number, source: string): Edit;
 /** Adds an empty lyric line after `lineIndex`. */
 export declare function insertLineAfter(doc: ChartDoc, lineIndex: number): Edit;
 /**

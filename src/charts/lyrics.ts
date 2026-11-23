@@ -282,15 +282,11 @@ export function importPasted(text: string, writtenKey?: string | null): string {
       continue
     }
     const next = lines[i + 1]?.trimEnd() ?? ""
-    const chords = [...line.matchAll(/\S+/g)].map((m) => ({ column: m.index!, chord: m[0] }))
     // A line kept as a directive does not belong under the chords above it.
     if (next.trim() !== "" && !isChordLine(next) && !sectionHeader(next) && !keptDirectives(next)) {
-      out.push(placeChords(next, chords))
+      out.push(placeChords(next, chordColumns(line)))
       i++
-    } else {
-      // A chord-only line (an intro or turnaround): keep the spacing as lyrics.
-      out.push(placeChords(" ".repeat(line.length), chords).trimEnd())
-    }
+    } else out.push(chordLineSource(line))
   }
   close()
   return out.join("\n")
@@ -438,6 +434,32 @@ function directiveLine(line: string): ReadonlyArray<Tag> | null {
 function keptDirectives(line: string): ReadonlyArray<Tag> | null {
   const tags = directiveLine(line)
   return tags && tags.length > 0 ? tags : null
+}
+
+/**
+ * A chord-only line (an intro, a turnaround, a solo's changes) as ChordPro:
+ * each chord at its column over blank text, so the line keeps the spacing it
+ * was written with. `line` must pass `isChordLine`.
+ */
+export function chordLineSource(line: string): string {
+  const trimmed = line.trimEnd()
+  return placeChords(" ".repeat(trimmed.length), chordColumns(trimmed)).trimEnd()
+}
+
+/**
+ * Pasted text as lines to put inside a chart that already exists: what
+ * `importPasted` makes of it, without the song's details (key, title, artist,
+ * tempo and the like), which belong to the chart and not to a passage of it.
+ */
+export function pastedPassage(text: string): string {
+  return importPasted(text)
+    .split("\n")
+    .filter((line) => !directiveLine(line)?.every((tag) => tag.isMetaTag()))
+    .join("\n")
+}
+
+function chordColumns(line: string): ReadonlyArray<{ column: number; chord: string }> {
+  return [...line.matchAll(/\S+/g)].map((m) => ({ column: m.index, chord: m[0] }))
 }
 
 function placeChords(lyrics: string, chords: ReadonlyArray<{ column: number; chord: string }>): string {

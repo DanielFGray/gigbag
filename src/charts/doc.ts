@@ -12,7 +12,7 @@
  * derived from the stored text, never stored.
  */
 import { composeChanges, rearranged, type Change, type Part } from "./changes.ts"
-import { isLiteralEnd, isLiteralStart, isPhraseStart } from "./lyrics.ts"
+import { chordLineSource, isChordLine, isLiteralEnd, isLiteralStart, isPhraseStart } from "./lyrics.ts"
 
 export type PlacedChord = { readonly at: number; readonly chord: string }
 
@@ -89,19 +89,47 @@ export function anchorLine(line: DocLine): string {
   return match ? (match[2] ?? "") : ""
 }
 
-/** The word-sized stretches of a lyric line, split further where a chord sits inside a word. */
+/**
+ * The word-sized stretches of a lyric line, split further where a chord sits
+ * inside a word. A chord-only line has no words, so it also has an empty
+ * stretch past its last chord, where the next chord of the passage goes.
+ */
 export function segments(line: Extract<DocLine, { kind: "lyrics" }>): ReadonlyArray<Segment> {
   const starts = new Set<number>([0])
   for (const match of line.text.matchAll(/\S+/g)) starts.add(match.index)
   for (const { at } of line.chords) starts.add(at)
   const breaks = [...starts].sort((a, b) => a - b)
-  return breaks.map((start, i) => {
+  const found = breaks.map((start, i) => {
     const end = breaks[i + 1] ?? line.text.length
     const chords = line.chords.flatMap((c, index) =>
       c.at >= start && (c.at < end || (i === breaks.length - 1 && c.at === end)) ? [index] : [],
     )
     return { start, end, chords }
   })
+  const next = nextChordColumn(line)
+  return next === null ? found : [...found, { start: next, end: next, chords: [] }]
+}
+
+/** True for a lyric line with chords and no words: an intro, a turnaround, a solo's changes. */
+export function isChordOnly(line: DocLine): boolean {
+  return line.kind === "lyrics" && line.chords.length > 0 && line.text.trim() === ""
+}
+
+/**
+ * A chord-only line as a player types it: each chord name at its column, with
+ * at least one space between names. `chordLineSource` reads it back.
+ */
+export function chordLineText(line: Extract<DocLine, { kind: "lyrics" }>): string {
+  return line.chords.reduce(
+    (text, { at, chord }) => (text.length < at ? text.padEnd(at) : text === "" ? text : `${text} `) + chord,
+    "",
+  )
+}
+
+/** Where a chord-only line's next chord goes: two spaces after the last chord's name, as a player types `G  C`. */
+function nextChordColumn(line: Extract<DocLine, { kind: "lyrics" }>): number | null {
+  const last = line.chords.at(-1)
+  return isChordOnly(line) && last ? Math.max(last.at + last.chord.length + 2, line.text.length) : null
 }
 
 // ---------------------------------------------------------------------------
@@ -113,20 +141,23 @@ export function segments(line: Extract<DocLine, { kind: "lyrics" }>): ReadonlyAr
  */
 export function placeChord(doc: ChartDoc, lineIndex: number, at: number, chord: string): Edit {
   const line = lyricsLine(doc, lineIndex)
-  const column = Math.max(0, Math.min(at, line.text.length))
+  // A chord-only line grows: a chord past its end pads its blank text out to the chord's column.
+  const room = isChordOnly(line) ? Math.max(at, line.text.length) : line.text.length
+  const column = Math.max(0, Math.min(at, room))
   const existing = line.chords.findIndex((c) => c.at === column)
   if (existing >= 0 && line.chords[existing]!.chord === chord) return { doc, changes: [] }
 
   const index = existing >= 0 ? existing : line.chords.filter((c) => c.at < column).length
-  const from = lineStart(doc, lineIndex) + chordOffset(line, index, column)
+  const padding = Math.max(0, column - line.text.length)
+  const from = lineStart(doc, lineIndex) + chordOffset(line, index, column - padding)
   const chords =
     existing >= 0
       ? line.chords.map((c, i) => (i === existing ? { at: column, chord } : c))
       : [...line.chords.slice(0, index), { at: column, chord }, ...line.chords.slice(index)]
   const replaced = existing >= 0 ? line.chords[existing]!.chord.length + 2 : 0
   return {
-    doc: replaceLine(doc, lineIndex, { ...line, chords }),
-    changes: [{ from, to: from + replaced, insert: chord.length + 2 }],
+    doc: replaceLine(doc, lineIndex, { ...line, text: line.text.padEnd(column), chords }),
+    changes: [{ from, to: from + replaced, insert: padding + chord.length + 2 }],
   }
 }
 
@@ -198,6 +229,61 @@ export function editLine(doc: ChartDoc, lineIndex: number, text: string): Edit {
     doc: edited,
     changes: change ? [{ from: base + change.from, to: base + change.to, insert: change.insert }] : [],
   }
+}
+
+/** Puts a chord-only line, read from `text` as a player types it (`G  C  D`), after `lineIndex`. */
+export function addChordLine(doc: ChartDoc, lineIndex: number, text: string): Edit {
+  return insertLineAt(doc, lineIndex + 1, chordLine(text))
+}
+
+/**
+ * Gives the chord-only line at `lineIndex` the chords of `text`, as a player
+ * types them; blank text leaves a blank line. The change is the replacement
+ * between the common start and end of the line's old and new anchor text.
+ */
+export function setChordLine(doc: ChartDoc, lineIndex: number, text: string): Edit {
+  const line = lyricsLine(doc, lineIndex)
+  const next = text.trim() === "" ? { kind: "lyrics" as const, text: "", chords: [] } : chordLine(text)
+  const [change] = commonEnds(anchorLine(line), anchorLine(next)).change
+  if (!change) return { doc, changes: [] }
+  const base = lineStart(doc, lineIndex)
+  return {
+    doc: replaceLine(doc, lineIndex, next),
+    changes: [{ from: base + change.from, to: base + change.to, insert: change.insert }],
+  }
+}
+
+function chordLine(text: string): Extract<DocLine, { kind: "lyrics" }> {
+  if (!isChordLine(text)) throw new Error(`not a chord line: ${JSON.stringify(text)}`)
+  return lyricsLine(parseDoc(chordLineSource(text)), 0)
+}
+
+/**
+ * Where lines pasted below `lineIndex` go, as the index the first of them
+ * takes. Sections do not nest, and nothing enters a tab or a phrase, so a
+ * paste that holds a section start, or one below a line of a tab or a phrase,
+ * goes after the end of the section it would land in; `moved` says so.
+ */
+export function pasteTarget(doc: ChartDoc, lineIndex: number, source: string): { at: number; moved: boolean } {
+  const at = lineIndex + 1
+  const open = enclosingSection(doc, at)
+  const startsSection = parseDoc(source).some(isStart)
+  if (!open || (!startsSection && !isLiteralStart(`start_of_${open.kind}`))) return { at, moved: false }
+  return { at: sectionEnd(doc, open.start) + 1, moved: true }
+}
+
+/**
+ * Puts ChordPro `source` (from `pastedPassage`) below the line at `lineIndex`,
+ * or where `pasteTarget` moves it. The lines are new text, so the change set
+ * is one insertion and marks around it stay on their words.
+ */
+export function pasteAfter(doc: ChartDoc, lineIndex: number, source: string): Edit {
+  if (source.trim() === "") return { doc, changes: [] }
+  const { at } = pasteTarget(doc, lineIndex, source)
+  return chain(
+    doc,
+    parseDoc(source).map((line, i) => (d: ChartDoc) => insertLineAt(d, at + i, line)),
+  )
 }
 
 /** Adds an empty lyric line after `lineIndex`. */
