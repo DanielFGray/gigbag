@@ -151,6 +151,7 @@ const INITIAL_STATE: ScorePlayerState = {
   status: "loading",
   error: null,
   rendered: false,
+  drawn: false,
   sound: "off",
   playing: false,
   positionMs: 0,

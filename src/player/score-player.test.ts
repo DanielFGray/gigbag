@@ -131,6 +131,7 @@ function fakeApi() {
     scoreLoaded: new ScoreLoadedEmitter(),
     renderStarted: new Emitter<boolean>(),
     postRenderFinished: new Emitter(),
+    renderer: { partialRenderFinished: new Emitter<{ renderResult: unknown }>() },
     playerReady: new Emitter(),
     playerStateChanged: new Emitter<{ state: number }>(),
     playerPositionChanged: new Emitter<{ currentTime: number; endTime: number }>(),
@@ -177,6 +178,7 @@ const handlerCount = (api: ReturnType<typeof fakeApi>["api"]) =>
     api.scoreLoaded,
     api.renderStarted,
     api.postRenderFinished,
+    api.renderer.partialRenderFinished,
     api.playerReady,
     api.playerStateChanged,
     api.playerPositionChanged,
@@ -198,6 +200,23 @@ test("a loaded score makes the state ready, and the draw events bracket rendered
   expect(player.getState().rendered).toBe(true)
   api.renderStarted.emit(true)
   expect(player.getState().rendered).toBe(false)
+})
+
+test("drawn turns true at the first drawn part, survives a redraw, and a load resets it", () => {
+  const { api } = fakeApi()
+  const player = createScorePlayer(api)
+  api.scoreLoaded.emit({ tempo: 120 })
+  api.renderStarted.emit(false)
+  // With lazy loading the layout reports empty parts and finishes the render before any part is drawn.
+  api.renderer.partialRenderFinished.emit({ renderResult: null })
+  api.postRenderFinished.emit()
+  expect(player.getState()).toMatchObject({ rendered: true, drawn: false })
+  api.renderer.partialRenderFinished.emit({ renderResult: "<svg></svg>" })
+  expect(player.getState().drawn).toBe(true)
+  api.renderStarted.emit(true)
+  expect(player.getState()).toMatchObject({ rendered: false, drawn: true })
+  player.load({ url: "/next.gp" })
+  expect(player.getState().drawn).toBe(false)
 })
 
 test("load passes a URL or bytes to alphaTab and tex to its tex call", () => {

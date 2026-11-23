@@ -8,9 +8,11 @@ export interface StaticScoreFrameProps {
   readonly score: StaticScore
   /**
    * True once the player inside has drawn its first part: set it from
-   * `api.renderer.partialRenderFinished`. `renderFinished` is too early, because
-   * with lazy loading it fires when the layout is done and before any part is
-   * drawn, so the frame would show an empty player.
+   * `useScorePlayer`'s `state.drawn`, or, for a bare `AlphaTabApi`, from the
+   * first `api.renderer.partialRenderFinished` that carries a `renderResult`.
+   * `rendered` and `renderFinished` are too early, because with lazy loading
+   * they come when the layout is done and before any part is drawn, so the
+   * frame would show an empty player.
    */
   readonly playerReady: boolean
   /** Where the page serves alphaTab's fonts. Defaults to where the kit's Vite plugin serves them. */

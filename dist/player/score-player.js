@@ -51,6 +51,7 @@ export function createScorePlayer(api, options = {}, now = () => performance.now
         status: "loading",
         error: null,
         rendered: false,
+        drawn: false,
         sound: "off",
         playing: false,
         positionMs: 0,
@@ -361,6 +362,10 @@ export function createScorePlayer(api, options = {}, now = () => performance.now
         }),
         api.renderStarted.on(() => update({ rendered: false })),
         api.postRenderFinished.on(() => update({ rendered: true })),
+        api.renderer.partialRenderFinished.on((part) => {
+            if (part.renderResult)
+                update({ drawn: true });
+        }),
         // alphaTab's own handler runs first and sets each track to its file's volume; ours then wins.
         api.playerReady.on(() => {
             if (held) {
@@ -442,7 +447,7 @@ export function createScorePlayer(api, options = {}, now = () => performance.now
             wantsPlay = false;
             resume = null;
             stopPractice();
-            update({ status: "loading", error: null, rendered: false });
+            update({ status: "loading", error: null, rendered: false, drawn: false });
             // The bars of the score before this one say nothing about the next.
             scoreBars = [];
             dropSelection();

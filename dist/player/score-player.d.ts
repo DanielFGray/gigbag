@@ -38,6 +38,12 @@ export interface ScorePlayerState {
     /** True once the score is drawn; false again while a redraw runs. Beat positions are valid only when true. */
     readonly rendered: boolean;
     /**
+     * True once the host holds the first drawn part of this score; false from each `load` until then, and a redraw
+     * leaves it true. With lazy loading `rendered` turns true when the layout is done, before any part is drawn, so
+     * this is the field that says the player shows music (for example `StaticScoreFrame`'s `playerReady`).
+     */
+    readonly drawn: boolean;
+    /**
      * The synthesizer and its sound font (about 1 MB) load on the first play, not with the score. `off` until then,
      * `loading` while they download, `ready` once they can play. The cursor, seek and selection work in every state.
      */
@@ -232,6 +238,15 @@ export interface PlayerApi {
     }>;
     readonly renderStarted: PlayerEventOf<boolean>;
     readonly postRenderFinished: PlayerEvent;
+    /**
+     * alphaTab's own handler, added before the controller's, puts each part into the host. A part with no
+     * `renderResult` is a placeholder from the layout, not a drawing.
+     */
+    readonly renderer: {
+        readonly partialRenderFinished: PlayerEventOf<{
+            readonly renderResult: unknown;
+        }>;
+    };
     readonly playerReady: PlayerEvent;
     readonly playerStateChanged: PlayerEventOf<{
         readonly state: number;
